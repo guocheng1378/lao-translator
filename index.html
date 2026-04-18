@@ -1121,6 +1121,13 @@ async function loadLocalModel() {
         // 配置：允许本地模型
         env.allowLocalModels = true;
         env.useBrowserCache = false;
+        
+        // 配置 ort-wasm 文件路径（必须！）
+        env.wasm = {
+            wasmPaths: {
+                'ort-wasm-simd-threaded.jsep.wasm': './ort-wasm-simd-threaded.jsep.wasm',
+            }
+        };
 
         modelStatus.textContent = '正在创建本地模型加载器...';
         progressFill.style.width = '10%';
