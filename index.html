@@ -216,7 +216,6 @@
             font-size: 0.75em;
             color: #999;
         }
-
         .mode-switcher {
             display: flex;
             justify-content: center;
@@ -246,6 +245,7 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
+            margin-top: 10px;
         }
         .source-btn {
             padding: 4px 12px;
@@ -265,19 +265,6 @@
             border-color: #1890ff;
             color: #1890ff;
         }
-        .loading-spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 0.8s linear infinite;
-            margin-right: 8px;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body>
@@ -287,14 +274,14 @@
             <p class="subtitle" id="subtitle">完全离线运行 · 无需网络 · 保护隐私</p>
             <span class="mode-badge offline" id="modeBadge">离线词典模式</span>
             <div class="mode-switcher">
-                <button class="mode-btn active" id="offlineModeBtn" onclick="setTranslationMode('offline')">📖 离线词典</button>
-                <button class="mode-btn" id="onlineModeBtn" onclick="setTranslationMode('online')">🌐 在线翻译</button>
+                <button class="mode-btn active" id="offlineModeBtn">📖 离线词典</button>
+                <button class="mode-btn" id="onlineModeBtn">🌐 在线翻译</button>
             </div>
-            <div class="translator-source" id="translatorSource" style="display:none; margin-top:10px;">
+            <div class="translator-source" id="translatorSource" style="display:none;">
                 <span style="font-size:0.8em; color:#888;">翻译源：</span>
-                <button class="source-btn active" id="bingBtn" onclick="setTranslatorSource('bing')">Bing</button>
-                <button class="source-btn" id="googleBtn" onclick="setTranslatorSource('google')">Google</button>
-                <button class="source-btn" id="autoBtn" onclick="setTranslatorSource('auto')">自动</button>
+                <button class="source-btn active" id="bingBtn">Bing</button>
+                <button class="source-btn" id="googleBtn">Google</button>
+                <button class="source-btn" id="autoBtn">自动</button>
             </div>
         </header>
         
@@ -311,9 +298,7 @@
                         <option value="zh">中文</option>
                     </select>
                 </div>
-                
                 <button class="swap-btn" id="swapBtn" title="交换语言">⇄</button>
-                
                 <div class="lang-group">
                     <label>目标语言</label>
                     <select id="tgtLang">
@@ -348,1142 +333,370 @@
     <div class="toast" id="toast"></div>
     
     <script>
+    // ============ 全局变量 ============
+    var translationMode = 'offline';
+    var translatorSource = 'auto';
+    var isRecording = false;
+    var recognition = null;
     
-// =====================================================
-// 翻译模式控制
-// =====================================================
-let translationMode = 'offline'; // 'offline' 或 'online'
-let translatorSource = 'auto';   // 'bing', 'google', 'auto'
-
-// Bing 翻译配置
-let bingConfig = {
-    IG: null,
-    IID: null,
-    key: null,
-    token: null,
-    subdomain: null,
-    tokenTs: null,
-    tokenExpiryInterval: null
-};
-
-// Google 翻译配置
-let googleConfig = {
-    token: null,
-    tokenTs: null
-};
-
-// 语言代码映射
-const BING_LANG_MAP = {
-    'lo': 'lo',
-    'zh': 'zh-Hans'
-};
-
-const GOOGLE_LANG_MAP = {
-    'lo': 'lo',
-    'zh': 'zh-CN'
-};
-
-/**
- * 设置翻译模式
- */
-function setTranslationMode(mode) {
-    translationMode = mode;
-    const offlineBtn = document.getElementById('offlineModeBtn');
-    const onlineBtn = document.getElementById('onlineModeBtn');
-    const modeBadge = document.getElementById('modeBadge');
-    const subtitle = document.getElementById('subtitle');
-    const dictInfo = document.getElementById('dictInfo');
-    const sourceSelector = document.getElementById('translatorSource');
-    
-    if (mode === 'offline') {
-        offlineBtn.classList.add('active');
-        onlineBtn.classList.remove('active');
-        modeBadge.textContent = '离线词典模式';
-        modeBadge.className = 'mode-badge offline';
-        subtitle.textContent = '完全离线运行 · 无需网络 · 保护隐私';
-        dictInfo.innerHTML = '<strong>💡 提示：</strong>本版本使用内置老挝语↔中文词典，支持常用词汇、短语和句型翻译。可直接使用语音输入！';
-        sourceSelector.style.display = 'none';
-    } else {
-        offlineBtn.classList.remove('active');
-        onlineBtn.classList.add('active');
-        modeBadge.textContent = '在线翻译模式';
-        modeBadge.className = 'mode-badge online';
-        subtitle.textContent = '支持 Bing/Google 翻译 · 需联网';
-        dictInfo.innerHTML = '<strong>💡 提示：</strong>在线翻译支持整句翻译和更丰富的词汇。可选择翻译源或使用自动模式！';
-        sourceSelector.style.display = 'flex';
-    }
-    
-    // 如果有输入文字，重新翻译
-    const inputText = document.getElementById('inputText').value.trim();
-    if (inputText) {
-        performTranslation();
-    }
-}
-
-/**
- * 设置翻译源
- */
-function setTranslatorSource(source) {
-    translatorSource = source;
-    const bingBtn = document.getElementById('bingBtn');
-    const googleBtn = document.getElementById('googleBtn');
-    const autoBtn = document.getElementById('autoBtn');
-    
-    bingBtn.classList.remove('active');
-    googleBtn.classList.remove('active');
-    autoBtn.classList.remove('active');
-    
-    if (source === 'bing') {
-        bingBtn.classList.add('active');
-        showToast('已切换到 Bing 翻译');
-    } else if (source === 'google') {
-        googleBtn.classList.add('active');
-        showToast('已切换到 Google 翻译');
-    } else {
-        autoBtn.classList.add('active');
-        showToast('已切换到自动模式');
-    }
-    
-    // 清除缓存的配置，强制重新获取
-    bingConfig = { IG: null, IID: null, key: null, token: null, subdomain: null, tokenTs: null, tokenExpiryInterval: null };
-    googleConfig = { token: null, tokenTs: null };
-    
-    // 重新翻译
-    const inputText = document.getElementById('inputText').value.trim();
-    if (inputText) {
-        performTranslation();
-    }
-}
-
-/**
- * 检测网络环境（尝试连接不同服务）
- */
-async function detectNetworkEnvironment() {
-    try {
-        // 先尝试 Bing（国内常用）
-        const bingTest = await fetch('https://cn.bing.com/translator', { 
-            method: 'HEAD',
-            mode: 'no-cors',
-            cache: 'no-store'
-        });
-        return 'bing';
-    } catch (e) {
-        try {
-            // Bing 失败，尝试 Google
-            const googleTest = await fetch('https://translate.google.com', {
-                method: 'HEAD',
-                mode: 'no-cors',
-                cache: 'no-store'
-            });
-            return 'google';
-        } catch (e2) {
-            return 'offline';
-        }
-    }
-}
-
-/**
- * 异步获取 Bing 翻译配置
- */
-async function getBingConfig() {
-    // 检查 token 是否过期
-    if (bingConfig.token && bingConfig.tokenTs && bingConfig.tokenExpiryInterval) {
-        const elapsed = Date.now() - bingConfig.tokenTs;
-        if (elapsed < bingConfig.tokenExpiryInterval - 60000) {
-            return bingConfig;
-        }
-    }
-    
-    try {
-        const response = await fetch('https://cn.bing.com/translator');
-        const html = await response.text();
-        
-        const igMatch = html.match(/IG:"([^"]+)"/);
-        const iidMatch = html.match(/data-iid="([^"]+)"/);
-        const tokenMatch = html.match(/params_AbusePreventionHelper\s?=\s?([^\]]+\])/);
-        
-        if (igMatch && iidMatch && tokenMatch) {
-            const tokenConfig = JSON.parse(tokenMatch[1]);
-            bingConfig = {
-                IG: igMatch[1],
-                IID: iidMatch[1],
-                key: tokenConfig[0],
-                token: tokenConfig[1],
-                tokenTs: Date.now(),
-                tokenExpiryInterval: 3600000,
-                subdomain: 'cn'
-            };
-            return bingConfig;
-        }
-        
-        return {
-            IG: 'A6F6A71D7E2B4E9B8C3D5F2A1E4B7C9D',
-            IID: 'translator.ative',
-            key: Date.now(),
-            token: '',
-            subdomain: 'cn'
-        };
-    } catch (e) {
-        console.error('获取 Bing 配置失败:', e);
-        throw e;
-    }
-}
-
-/**
- * 使用 Bing 翻译 API
- */
-async function bingTranslate(text, fromLang, toLang) {
-    const config = await getBingConfig();
-    const fromCode = BING_LANG_MAP[fromLang] || 'auto-detect';
-    const toCode = BING_LANG_MAP[toLang] || 'zh-Hans';
-    
-    const url = `https://cn.bing.com/ttranslatev3?IG=${config.IG}&IID=${config.IID}`;
-    const formData = new FormData();
-    formData.append('text', text);
-    formData.append('fromLang', fromCode);
-    formData.append('to', toCode);
-    
-    const response = await fetch(url, {
-        method: 'POST',
-        body: formData
-    });
-    
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const result = await response.json();
-    
-    if (result && result[0] && result[0].translations && result[0].translations[0]) {
-        return result[0].translations[0].text;
-    }
-    
-    throw new Error('无效的响应格式');
-}
-
-/**
- * 获取 Google 翻译 token
- */
-async function getGoogleToken() {
-    if (googleConfig.token && googleConfig.tokenTs) {
-        const elapsed = Date.now() - googleConfig.tokenTs;
-        if (elapsed < 3600000) { // 1小时有效期
-            return googleConfig.token;
-        }
-    }
-    
-    try {
-        // 使用一个简单的代理来获取 Google 翻译
-        // 实际上这里我们使用免费的 mymemory 翻译作为 Google 的替代
-        // 因为直接调用 Google 翻译 API 需要 token
-        
-        // 这里我们使用 LibreTranslate 或 MyMemory 作为备选
-        // 为了简化，直接使用 fetch 调用翻译 API
-        
-        // 获取 Google 翻译页面的 token
-        const response = await fetch('https://translate.google.com/');
-        const html = await response.text();
-        
-        // 尝试提取 token（简单实现）
-        const tokenMatch = html.match(/tkk:'([^']+)'/);
-        if (tokenMatch) {
-            googleConfig.token = tokenMatch[1];
-            googleConfig.tokenTs = Date.now();
-            return tokenMatch[1];
-        }
-        
-        // 如果提取失败，使用时间戳作为简单 token
-        googleConfig.token = String(Date.now());
-        googleConfig.tokenTs = Date.now();
-        return googleConfig.token;
-    } catch (e) {
-        console.error('获取 Google token 失败:', e);
-        throw e;
-    }
-}
-
-/**
- * 使用 MyMemory API 翻译（免费，无需 API key，可作为 Google 替代）
- */
-async function myMemoryTranslate(text, fromLang, toLang) {
-    const fromCode = fromLang === 'lo' ? 'lo' : 'zh-CN';
-    const toCode = fromLang === 'lo' ? 'zh-CN' : 'lo';
-    
-    // MyMemory API - 免费翻译服务
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${fromCode}|${toCode}`;
-    
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const result = await response.json();
-    
-    if (result && result.responseStatus === 200 && result.responseData) {
-        return result.responseData.translatedText;
-    }
-    
-    throw new Error('翻译失败');
-}
-
-/**
- * 使用 Google 翻译网页版
- */
-async function googleTranslate(text, fromLang, toLang) {
-    try {
-        // 方法1: 直接调用 MyMemory（类似 Google 风格，免费）
-        return await myMemoryTranslate(text, fromLang, toLang);
-    } catch (e1) {
-        console.error('MyMemory 翻译失败:', e1);
-        
-        // 方法2: 尝试 LibreTranslate（开源翻译 API）
-        try {
-            const response = await fetch('https://libretranslate.com/translate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    q: text,
-                    source: fromLang === 'lo' ? 'lo' : 'zh',
-                    target: fromLang === 'lo' ? 'zh' : 'lo',
-                    format: 'text'
-                })
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                if (result && result.translatedText) {
-                    return result.translatedText;
-                }
-            }
-        } catch (e2) {
-            console.error('LibreTranslate 也失败了:', e2);
-        }
-        
-        throw e1;
-    }
-}
-
-/**
- * 自动选择翻译源并翻译
- */
-async function autoTranslate(text, fromLang, toLang) {
-    // 如果设置了固定源，使用该源
-    if (translatorSource === 'bing') {
-        return await bingTranslate(text, fromLang, toLang);
-    }
-    if (translatorSource === 'google') {
-        return await googleTranslate(text, fromLang, toLang);
-    }
-    
-    // 自动模式：先尝试 Bing，失败后尝试 Google
-    try {
-        return await bingTranslate(text, fromLang, toLang);
-    } catch (e1) {
-        console.error('Bing 翻译失败，尝试 Google:', e1);
-        try {
-            return await googleTranslate(text, fromLang, toLang);
-        } catch (e2) {
-            console.error('Google 翻译也失败:', e2);
-            throw e2;
-        }
-    }
-}
-
-/**
- * 翻译函数，支持在线和离线模式
- */
-// =====================================================
-// 全局 DOM 元素引用（必须在函数定义之前声明）
-// =====================================================
-const srcLang = document.getElementById('srcLang');
-const tgtLang = document.getElementById('tgtLang');
-const inputText = document.getElementById('inputText');
-const resultText = document.getElementById('resultText');
-const translateBtn = document.getElementById('translateBtn');
-
-async function performTranslationAsync() {
-    const text = inputText.value.trim();
-    if (!text) {
-        resultText.textContent = '翻译结果将显示在这里';
-        showToast('请输入要翻译的文字');
-        return;
-    }
-    
-    resultText.textContent = '正在翻译...';
-    translateBtn.disabled = true;
-    
-    try {
-        let result;
-        
-        if (translationMode === 'online') {
-            result = await autoTranslate(text, srcLang.value, tgtLang.value);
-        } else {
-            result = translateText(text, srcLang.value, tgtLang.value);
-        }
-        
-        resultText.textContent = result;
-    } catch (e) {
-        // 如果在线翻译失败，自动降级到离线词典
-        if (translationMode === 'online') {
-            showToast('在线翻译失败，使用离线词典...');
-            try {
-                const result = translateText(text, srcLang.value, tgtLang.value);
-                resultText.textContent = result + '
-
-⚠️ 在线翻译不可用，以上为词典翻译结果';
-            } catch (e2) {
-                resultText.textContent = '翻译失败，请检查网络连接';
-                showToast('翻译失败');
-            }
-        } else {
-            resultText.textContent = '翻译失败，请重试';
-            showToast('翻译失败');
-        }
-    } finally {
-        translateBtn.disabled = false;
-    }
-}
-
-const inputText = document.getElementById('inputText');
-const resultText = document.getElementById('resultText');
-const translateBtn = document.getElementById('translateBtn');
-
-
-// =====================================================
-    // 内置老挝语↔中文词典数据库
-    // =====================================================
-    const DICTIONARY = {
-        // 老挝语 → 中文
+    // ============ 内置词典 ============
+    var DICTIONARY = {
         'lo_zh': {
-            // 基本问候
-            'sabaidee': '你好',
-            'sabaidee chai': '你好（男性说）',
-            'sabaidee ka': '你好（女性说）',
-            'sabaidee tee': '大家好',
-            'lao sawatdee': '老挝你好',
-            'wannayok': '早上好',
-            'sawadee': '再见',
-            'lao kon chai': '老挝人（男性）',
-            'lao kon ka': '老挝人（女性）',
-            
-            // 常用词汇
-            'khop chai': '谢谢',
-            'khop chai lai': '非常感谢',
-            'khaw thoot': '对不起/抱歉',
-            'mai chai': '不是',
-            'chai': '是/对',
-            'di': '好/漂亮',
-            'mai di': '不好/不行',
-            'di mak': '非常好',
-            'hong': '房间/房子',
-            'hong nam': '浴室/洗手间',
-            'phak': '蔬菜',
-            'khao': '米饭/天空/白',
-            'khao man': '炒饭',
-            'phet': '辣',
-            'khem': '咸',
-            'wan': '甜',
-            'ow': '热/烫',
-            'yen': '冷/凉',
-            'mia': '新',
-            'kao': '旧/老',
-            'lang': '后/后面',
-            'na': '田/前面',
-            'khang': '旁边',
-            'tae': '但/只',
-            'pong': '全部/都',
-            'mo': '大',
-            'noy': '小/稍微',
-            'pok': '多',
-            'ti': '只/仅',
-            
-            // 数字
-            'neung': '一',
-            'song': '二',
-            'sam': '三',
-            'si': '四',
-            'ha': '五',
-            'hok': '六',
-            'chet': '七',
-            'paet': '八',
-            'kao': '九',
-            'sip': '十',
-            'sip et': '十一',
-            'sip song': '十二',
-            'neung roey': '一百',
-            'song roey': '二百',
-            
-            // 时间
-            'moong': '月/月份',
-            'vee la': '星期/周',
-            'mong': '小时/点',
-            'na ti': '分钟',
-            'ti aek': '现在',
-            'muan': '今天',
-            'mee': '明天',
-            'waan': '昨天',
-            'kham': '晚上/夜',
-            'thang': '早上/上午',
-            'bai': '下午',
-            
-            // 人物称呼
-            'phuu ying': '女人/女士',
-            'phuu chai': '男人/先生',
-            'me': '妈妈',
-            'poe': '爸爸',
-            'pi': '哥哥/姐姐',
-            'nong': '弟弟/妹妹',
-            'luuk': '孩子',
-            'phor': '爷爷/外公',
-            'yaa': '奶奶/外婆',
-            'khon': '人',
-            'phii': '朋友',
-            
-            // 地点
-            'muang': '城市/国家',
-            'baan': '村/家',
-            'talaat': '市场',
-            'vat': '寺庙/佛塔',
-            'hong taam yaa': '医院',
-            'sekolaa': '学校',
-            'tam ruam': '警察局',
-            'kaa saang': '机场',
-            'tha kha': '码头/港口',
-            'saatham': '车站',
-            'hotelo': '酒店',
-            'res toran': '餐厅',
-            'baa': '酒吧',
-            'kaafe': '咖啡馆',
-            
-            // 交通
-            'lot': '车/车辆',
-            'maito': '摩托车',
-            'sawngthaew': '双条车（小型客车）',
-            'taek': '船',
-            'bensii': '自行车',
-            'kaa': '路',
-            'taam': '方向/路',
-            'khee': '左',
-            'kwaang': '右',
-            'phaeng': '直走',
-            'maak': '回来/返回',
-            
-            // 食物饮料
-            'aahaan': '食物/饭',
-            'aahaan khao': '米饭',
-            'khao soi': '老挝面（著名老挝菜）',
-            'larb': '辣肉沙拉（老挝名菜）',
-            'tam ahaam': '青木瓜沙拉',
-            'sin dad': '烤肉串',
-            'sai ou': '香肠',
-            'khao jee': '法棍面包',
-            'foy': '米粉/汤面',
-            'nam': '水',
-            'nam khao': '水（老语）',
-            'nom': '牛奶',
-            'kaafe': '咖啡',
-            'lao hao': '老挝啤酒',
-            'mia': '酒',
-            
-            // 生活常用
-            'bpen': '是/在',
-            'yu': '在',
-            'pai': '去/走',
-            'ma': '来',
-            'dai': '能/会/得到',
-            'yang': '还/仍然',
-            'het': '做/做',
-            'bpai': '买',
-            'khian': '写/读',
-            'an': '拿/取',
-            'hy': '吃/喝',
-            'namm': '睡觉/躺',
-            'won': '坐',
-            'to': '站立',
-            'pian': '跑',
-            'diao': '走/去',
-            
-            // 老挝相关
-            'lao': '老挝',
-            'lao': '老挝人',
-            'lang juan': '老挝人（礼貌）',
-            'meuang lao': '老挝（国名）',
-            'vientiane': '万象（老挝首都）',
-            'luang prabang': '琅勃拉邦',
-            'pakse': '巴色',
-            'lao': '老',
-            'wat phu': '石缸平原',
-            'si khong': '四千岛',
-            
-            // 常用短语
-            'khor thong': '多少钱',
-            'ao dai': '要多少',
-            'ao nee': '要这个',
-            'ao nan': '要那个',
-            'pai sao': '去哪里',
-            'ma jing jah': '来这里',
-            'khy nyang': '叫什么名字',
-            'chan khmid': '我叫...',
-            'chan pen': '我是...',
-            'pen yang rai': '怎么样',
-            'mai chai yang rai': '不太好',
-            'di chai': '好的/好的',
-            'tao rai': '多少',
-            'pben yang rai': '怎么样',
-            'dai noi': '可以/好的',
-            'mai dai': '不行/不可以',
-            'thiam mak': '很贵',
-            'thiam noi': '便宜点',
-            'thiam rai': '贵吗',
-            'hong nam yoo saa': '厕所在哪里',
-            'pai jing jah': '怎么走',
-            'tao rai': '多少钱',
-            'pben nee': '这个',
-            'pben nan': '那个',
-            'aroy': '好吃',
-            'aroy mak': '很好吃',
-            'him': '有',
-            'mai him': '没有',
-            'ke sang': '请',
-            'nai': '请...（礼貌）',
-            
-            // 问路
-            'pai jing jah': '怎么走',
-            'kai nee': '这边',
-            'kai nan': '那边',
-            'kor tong': '近',
-            'kor lai': '远',
-            
-            // 身体
-            'hua': '头',
-            'ta': '眼睛',
-            'hua': '脸',
-            'mo': '嘴',
-            'hua': '耳朵',
-            'kao': '手',
-            'kha': '脚/腿',
-            'phak': '脖子',
-            'hua jai': '心脏',
-            'ke': '牙齿',
-            
-            // 天气
-            'khua': '天气',
-            'phuen': '热',
-            'nao': '冷',
-            'plo': '雨',
-            'fa': '风',
-            'van': '太阳',
-            'duean': '月亮',
-            'phaa': '山',
-            'nam': '河/水',
-            'taa': '湖',
+            'sabaidee': '你好', 'sabaidee chai': '你好（男性）', 'sabaidee ka': '你好（女性）',
+            'sabaidee tee': '大家好', 'wannayok': '早上好', 'sawadee': '再见',
+            'khop chai': '谢谢', 'khop chai lai': '非常感谢', 'khaw thoot': '对不起',
+            'chai': '是', 'mai chai': '不是', 'di': '好', 'di mak': '非常好', 'mai di': '不好',
+            'hong': '房间', 'hong nam': '厕所/浴室', 'phak': '蔬菜', 'khao': '米饭',
+            'phet': '辣', 'khem': '咸', 'wan': '甜', 'ow': '热', 'yen': '冷',
+            'neung': '一', 'song': '二', 'sam': '三', 'si': '四', 'ha': '五',
+            'hok': '六', 'chet': '七', 'paet': '八', 'kao': '九', 'sip': '十',
+            'moong': '月', 'vee la': '星期', 'mong': '小时/点', 'ti aek': '现在',
+            'muan': '今天', 'mee': '明天', 'waan': '昨天', 'kham': '晚上',
+            'phuu ying': '女人', 'phuu chai': '男人', 'me': '妈妈', 'poe': '爸爸',
+            'pi': '哥哥/姐姐', 'nong': '弟弟/妹妹', 'luuk': '孩子', 'khon': '人',
+            'muang': '城市', 'baan': '村/家', 'talaat': '市场', 'vat': '寺庙',
+            'hotelo': '酒店', 'res toran': '餐厅', 'kaafe': '咖啡馆',
+            'lot': '车', 'maito': '摩托车', 'taek': '船', 'kaa': '路',
+            'khao man': '炒饭', 'khao soi': '老挝面', 'larb': '辣肉沙拉',
+            'tam ahaam': '青木瓜沙拉', 'foy': '米粉', 'nam': '水',
+            'lao hao': '老挝啤酒', 'lao': '老挝',
+            'vientiane': '万象', 'luang prabang': '琅勃拉邦',
+            'aroy': '好吃', 'aroy mak': '很好吃', 'him': '有', 'mai him': '没有',
+            'pai': '去', 'ma': '来', 'dai': '能/会', 'hy': '吃/喝',
+            'tao rai': '多少钱', 'khor thong': '多少钱', 'pen yang rai': '怎么样',
+            'dai noi': '可以', 'mai dai': '不行', 'ke sang': '请'
         },
-        
-        // 中文 → 老挝语
         'zh_lo': {
-            // 基本问候
-            '你好': 'sabaidee',
-            '再见': 'sawadee',
-            '再见（正式）': 'lao sawatdee',
-            '早上好': 'wannayok',
-            '大家好': 'sabaidee tee',
-            '男性用你好': 'sabaidee chai',
-            '女性用你好': 'sabaidee ka',
-            '老挝人': 'lao',
-            '老挝男人': 'lao kon chai',
-            '老挝女人': 'lao kon ka',
-            
-            // 常用词汇
-            '谢谢': 'khop chai',
-            '非常感谢': 'khop chai lai',
-            '对不起': 'khaw thoot',
-            '抱歉': 'khaw thoot',
-            '不是': 'mai chai',
-            '是': 'chai',
-            '对': 'chai',
-            '好': 'di',
-            '不好': 'mai di',
-            '很好': 'di mak',
-            '漂亮': 'di',
-            '房间': 'hong',
-            '厕所': 'hong nam',
-            '浴室': 'hong nam',
-            '洗手间': 'hong nam',
-            '蔬菜': 'phak',
-            '米饭': 'khao',
-            '辣': 'phet',
-            '咸': 'khem',
-            '甜': 'wan',
-            '热': 'ow',
-            '烫': 'ow',
-            '冷': 'yen',
-            '凉': 'yen',
-            '新': 'mia',
-            '旧': 'kao',
-            '老': 'kao',
-            '后面': 'lang',
-            '前面': 'na',
-            '旁边': 'khang',
-            '只': 'ti',
-            '都': 'pong',
-            '但是': 'tae',
-            '大': 'mo',
-            '小': 'noy',
-            '多': 'pok',
-            '少': 'noy',
-            
-            // 数字
-            '一': 'neung',
-            '二': 'song',
-            '三': 'sam',
-            '四': 'si',
-            '五': 'ha',
-            '六': 'hok',
-            '七': 'chet',
-            '八': 'paet',
-            '九': 'kao',
-            '十': 'sip',
-            '十一': 'sip et',
-            '十二': 'sip song',
-            '一百': 'neung roey',
-            '两百': 'song roey',
-            
-            // 时间
-            '月': 'moong',
-            '月份': 'moong',
-            '星期': 'vee la',
-            '周': 'vee la',
-            '小时': 'mong',
-            '点': 'mong',
-            '分钟': 'na ti',
-            '现在': 'ti aek',
-            '今天': 'muan',
-            '明天': 'mee',
-            '昨天': 'waan',
-            '晚上': 'kham',
-            '夜': 'kham',
-            '早上': 'thang',
-            '上午': 'thang',
-            '下午': 'bai',
-            
-            // 人物称呼
-            '女人': 'phuu ying',
-            '女士': 'phuu ying',
-            '男人': 'phuu chai',
-            '先生': 'phuu chai',
-            '妈妈': 'me',
-            '父亲': 'poe',
-            '爸爸': 'poe',
-            '哥哥': 'pi',
-            '姐姐': 'pi',
-            '弟弟': 'nong',
-            '妹妹': 'nong',
-            '孩子': 'luuk',
-            '小孩': 'luuk',
-            '爷爷': 'phor',
-            '外公': 'phor',
-            '奶奶': 'yaa',
-            '外婆': 'yaa',
-            '人': 'khon',
-            '朋友': 'phii',
-            
-            // 地点
-            '城市': 'muang',
-            '国家': 'muang',
-            '村庄': 'baan',
-            '家': 'baan',
-            '市场': 'talaat',
-            '寺庙': 'vat',
-            '佛塔': 'vat',
-            '医院': 'hong taam yaa',
-            '学校': 'sekolaa',
-            '警察局': 'tam ruam',
-            '机场': 'kaa saang',
-            '码头': 'tha kha',
-            '港口': 'tha kha',
-            '车站': 'saatham',
-            '酒店': 'hotelo',
-            '餐厅': 'res toran',
-            '酒吧': 'baa',
-            '咖啡馆': 'kaafe',
-            
-            // 交通
-            '车': 'lot',
-            '汽车': 'lot',
-            '摩托车': 'maito',
-            '船': 'taek',
-            '自行车': 'bensii',
-            '路': 'kaa',
-            '左边': 'khee',
-            '右边': 'kwaang',
-            '直走': 'phaeng',
-            '回来': 'maak',
-            '返回': 'maak',
-            
-            // 食物饮料
-            '食物': 'aahaan',
-            '饭': 'aahaan',
-            '炒饭': 'khao man',
-            '老挝面': 'khao soi',
-            '辣肉沙拉': 'larb',
-            '青木瓜沙拉': 'tam ahaam',
-            '烤肉串': 'sin dad',
-            '香肠': 'sai ou',
-            '法棍': 'khao jee',
-            '米粉': 'foy',
-            '汤面': 'foy',
-            '水': 'nam',
-            '牛奶': 'nom',
-            '咖啡': 'kaafe',
-            '啤酒': 'lao hao',
-            '酒': 'mia',
-            
-            // 生活常用
-            '在': 'yu',
-            '是': 'bpen',
-            '去': 'pai',
-            '来': 'ma',
-            '能': 'dai',
-            '会': 'dai',
-            '还': 'yang',
-            '仍然': 'yang',
-            '做': 'het',
-            '买': 'bpai',
-            '写': 'khian',
-            '读': 'khian',
-            '拿': 'an',
-            '取': 'an',
-            '吃': 'hy',
-            '喝': 'hy',
-            '睡觉': 'namm',
-            '躺': 'namm',
-            '坐': 'won',
-            '站': 'to',
-            '跑': 'pian',
-            '走': 'diao',
-            
-            // 老挝相关
-            '老挝': 'meuang lao',
-            '万象': 'vientiane',
-            '琅勃拉邦': 'luang prabang',
-            '巴色': 'pakse',
-            '石缸平原': 'wat phu',
-            '四千岛': 'si khong',
-            
-            // 常用短语
-            '多少钱': 'tao rai',
-            '这个多少钱': 'khor thong',
-            '要这个': 'ao nee',
-            '要那个': 'ao nan',
-            '去哪里': 'pai sao',
-            '来这里': 'ma jing jah',
-            '叫什么名字': 'khy nyang',
-            '我叫': 'chan khmid',
-            '我是': 'chan pen',
-            '怎么样': 'pen yang rai',
-            '不太好': 'mai chai yang rai',
-            '好的': 'dai noi',
-            '可以': 'dai noi',
-            '不行': 'mai dai',
-            '不可以': 'mai dai',
-            '很贵': 'thiam mak',
-            '便宜点': 'thiam noi',
-            '贵吗': 'thiam rai',
-            '厕所在哪里': 'hong nam yoo saa',
-            '怎么走': 'pai jing jah',
-            '这个': 'pben nee',
-            '那个': 'pben nan',
-            '好吃': 'aroy',
-            '很好吃': 'aroy mak',
-            '有': 'him',
-            '没有': 'mai him',
-            '请': 'ke sang',
-            
-            // 问路
-            '怎么走': 'pai jing jah',
-            '这边': 'kai nee',
-            '那边': 'kai nan',
-            '近': 'kor tong',
-            '远': 'kor lai',
-            
-            // 身体
-            '头': 'hua',
-            '眼睛': 'ta',
-            '脸': 'hua',
-            '嘴': 'mo',
-            '耳朵': 'hua',
-            '手': 'kao',
-            '脚': 'kha',
-            '腿': 'kha',
-            '脖子': 'phak',
-            '心脏': 'hua jai',
-            '牙齿': 'ke',
-            
-            // 天气
-            '天气': 'khua',
-            '热': 'phuen',
-            '冷': 'nao',
-            '雨': 'plo',
-            '风': 'fa',
-            '太阳': 'van',
-            '月亮': 'duean',
-            '山': 'phaa',
-            '河': 'nam',
-            '湖': 'taa',
+            '你好': 'sabaidee', '再见': 'sawadee', '早上好': 'wannayok',
+            '谢谢': 'khop chai', '非常感谢': 'khop chai lai', '对不起': 'khaw thoot',
+            '是': 'chai', '不是': 'mai chai', '好': 'di', '很好': 'di mak', '不好': 'mai di',
+            '房间': 'hong', '厕所': 'hong nam', '浴室': 'hong nam', '蔬菜': 'phak', '米饭': 'khao',
+            '辣': 'phet', '咸': 'khem', '甜': 'wan', '热': 'ow', '冷': 'yen',
+            '一': 'neung', '二': 'song', '三': 'sam', '四': 'si', '五': 'ha',
+            '六': 'hok', '七': 'chet', '八': 'paet', '九': 'kao', '十': 'sip',
+            '月': 'moong', '星期': 'vee la', '小时': 'mong', '点': 'mong',
+            '现在': 'ti aek', '今天': 'muan', '明天': 'mee', '昨天': 'waan', '晚上': 'kham',
+            '女人': 'phuu ying', '男人': 'phuu chai', '妈妈': 'me', '爸爸': 'poe',
+            '哥哥': 'pi', '姐姐': 'pi', '弟弟': 'nong', '妹妹': 'nong', '孩子': 'luuk', '人': 'khon',
+            '城市': 'muang', '村庄': 'baan', '家': 'baan', '市场': 'talaat', '寺庙': 'vat',
+            '酒店': 'hotelo', '餐厅': 'res toran', '咖啡馆': 'kaafe',
+            '车': 'lot', '汽车': 'lot', '摩托车': 'maito', '船': 'taek', '路': 'kaa',
+            '炒饭': 'khao man', '老挝面': 'khao soi', '辣肉沙拉': 'larb',
+            '青木瓜沙拉': 'tam ahaam', '米粉': 'foy', '汤面': 'foy', '水': 'nam',
+            '啤酒': 'lao hao', '老挝': 'meuang lao', '万象': 'vientiane', '琅勃拉邦': 'luang prabang',
+            '好吃': 'aroy', '很好吃': 'aroy mak', '有': 'him', '没有': 'mai him',
+            '去': 'pai', '来': 'ma', '能': 'dai', '会': 'dai', '吃': 'hy', '喝': 'hy',
+            '多少钱': 'tao rai', '怎么样': 'pen yang rai', '可以': 'dai noi', '不行': 'mai dai', '请': 'ke sang'
         }
     };
-
-    // =====================================================
-    // 应用状态
-    // =====================================================
-    let isRecording = false;
-    let recognition = null;
     
-    // =====================================================
-    // 工具函数
-    // =====================================================
-    function showToast(msg, duration = 2000) {
-        const t = document.getElementById('toast');
+    // ============ DOM 元素 ============
+    var srcLangEl, tgtLangEl, inputTextEl, resultTextEl, translateBtnEl;
+    
+    // ============ 工具函数 ============
+    function $(id) { return document.getElementById(id); }
+    
+    function showToast(msg) {
+        var t = $('toast');
         t.textContent = msg;
         t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), duration);
+        setTimeout(function() { t.classList.remove('show'); }, 2000);
     }
     
     function updateCharCount() {
-        const len = document.getElementById('inputText').value.length;
-        document.getElementById('charCount').textContent = len;
+        $('charCount').textContent = $('inputText').value.length;
     }
     
     function getSpeechLang(lang) {
         return lang === 'lo' ? 'lo-LA' : 'zh-CN';
     }
     
-    // =====================================================
-    // 核心翻译函数 - 基于词典的翻译
-    // =====================================================
-    function translateText(inputText, srcLang, tgtLang) {
-        const text = inputText.trim().toLowerCase();
-        if (!text) return '';
+    // ============ 翻译函数 ============
+    function translateWithDict(text, srcLang, tgtLang) {
+        var key = text.trim().toLowerCase();
+        var direction = srcLang === 'lo' ? 'lo_zh' : 'zh_lo';
+        var dict = DICTIONARY[direction];
         
-        // 确定翻译方向
-        const direction = srcLang === 'lo' ? 'lo_zh' : 'zh_lo';
-        const dict = DICTIONARY[direction];
-        
-        // 1. 精确匹配
-        if (dict[text]) {
-            return dict[text];
+        if (dict[key]) {
+            return dict[key];
         }
         
-        // 2. 尝试逐词匹配
-        const words = text.split(/\s+/);
-        const results = [];
-        let foundCount = 0;
+        var words = key.split(/\s+/);
+        var results = [];
+        var foundCount = 0;
         
-        for (const word of words) {
-            if (dict[word]) {
-                results.push(dict[word]);
+        for (var i = 0; i < words.length; i++) {
+            if (dict[words[i]]) {
+                results.push(dict[words[i]]);
                 foundCount++;
             } else {
-                results.push(word);
+                results.push(words[i]);
             }
         }
         
-        // 如果找到的词超过一半，组合结果
         if (foundCount > 0) {
-            // 移除重复词，保留原始词顺序
-            const finalResult = results.join(' ');
-            // 如果完全匹配到，返回那个结果
+            var result = results.join(' ');
             if (foundCount === words.length) {
-                return finalResult;
+                return result;
             }
-            // 否则返回带翻译的混合结果
-            return `[翻译] ${finalResult}`;
+            return '翻译: ' + result;
         }
         
-        // 3. 返回带提示的原始文本
-        return `【提示】词典中未收录此内容\n原文: ${inputText}\n\n💡 建议：尝试输入更简短的词组或单词`;
+        return '【未收录】词典中没有这个词\n原文: ' + text;
     }
     
-    // =====================================================
-    // =====================================================
-    
-    // 语言交换
-    document.getElementById('swapBtn').addEventListener('click', () => {
-        const src = srcLang.value;
-        srcLang.value = tgtLang.value;
-        tgtLang.value = src;
-        showToast('已交换语言方向');
-    });
-    
-    // 语言变化时自动翻译
-    srcLang.addEventListener('change', () => {
-        if (inputText.value.trim()) {
-            performTranslation();
-        }
-    });
-    
-    tgtLang.addEventListener('change', () => {
-        if (inputText.value.trim()) {
-            performTranslation();
-        }
-    });
-    
-    // 字符计数
-    inputText.addEventListener('input', updateCharCount);
-    
-    // 翻译
-    function performTranslation() {
-        performTranslationAsync();
+    async function translateOnline(text, fromLang, toLang) {
+        // 尝试 MyMemory API
+        try {
+            var fromCode = fromLang === 'lo' ? 'lo' : 'zh-CN';
+            var toCode = fromLang === 'lo' ? 'zh-CN' : 'lo';
+            var url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=' + fromCode + '|' + toCode;
+            
+            var resp = await fetch(url);
+            var data = await resp.json();
+            
+            if (data.responseStatus === 200 && data.responseData) {
+                return data.responseData.translatedText;
+            }
+        } catch(e) {}
+        
+        // 尝试 LibreTranslate
+        try {
+            var resp2 = await fetch('https://libretranslate.com/translate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    q: text,
+                    source: fromLang === 'lo' ? 'lo' : 'zh',
+                    target: fromLang === 'lo' ? 'zh' : 'lo'
+                })
+            });
+            var data2 = await resp2.json();
+            if (data2.translatedText) {
+                return data2.translatedText;
+            }
+        } catch(e) {}
+        
+        throw new Error('在线翻译失败');
     }
     
-    translateBtn.addEventListener('click', performTranslation);
-    
-    // 回车翻译（Ctrl+Enter）
-    inputText.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.ctrlKey) {
-            e.preventDefault();
-            performTranslation();
+    async function doTranslate() {
+        var text = $('inputText').value.trim();
+        if (!text) {
+            showToast('请输入要翻译的文字');
+            return;
         }
-    });
+        
+        $('resultText').textContent = '正在翻译...';
+        $('translateBtn').disabled = true;
+        
+        try {
+            var result;
+            if (translationMode === 'online') {
+                try {
+                    result = await translateOnline(text, $('srcLang').value, $('tgtLang').value);
+                } catch(e) {
+                    showToast('在线翻译失败，使用离线词典');
+                    result = translateWithDict(text, $('srcLang').value, $('tgtLang').value);
+                    result += '\n(离线词典)';
+                }
+            } else {
+                result = translateWithDict(text, $('srcLang').value, $('tgtLang').value);
+            }
+            $('resultText').textContent = result;
+        } catch(e) {
+            $('resultText').textContent = '翻译失败，请重试';
+            showToast('翻译失败');
+        }
+        
+        $('translateBtn').disabled = false;
+    }
     
-    // =====================================================
-    // 语音识别
-    // =====================================================
-    function initSpeechRecognition() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // ============ 模式切换 ============
+    function setTranslationMode(mode) {
+        translationMode = mode;
+        
+        $('offlineModeBtn').classList.toggle('active', mode === 'offline');
+        $('onlineModeBtn').classList.toggle('active', mode === 'online');
+        
+        var badge = $('modeBadge');
+        if (mode === 'offline') {
+            badge.textContent = '离线词典模式';
+            badge.className = 'mode-badge offline';
+            $('subtitle').textContent = '完全离线运行 · 无需网络 · 保护隐私';
+            $('dictInfo').innerHTML = '<strong>💡 提示：</strong>本版本使用内置老挝语↔中文词典，支持常用词汇、短语和句型翻译。可直接使用语音输入！';
+            $('translatorSource').style.display = 'none';
+        } else {
+            badge.textContent = '在线翻译模式';
+            badge.className = 'mode-badge online';
+            $('subtitle').textContent = '支持 Bing/Google 翻译 · 需联网';
+            $('dictInfo').innerHTML = '<strong>💡 提示：</strong>在线翻译支持整句翻译和更丰富的词汇。可选择翻译源！';
+            $('translatorSource').style.display = 'flex';
+        }
+    }
+    
+    function setTranslatorSource(source) {
+        translatorSource = source;
+        $('bingBtn').classList.remove('active');
+        $('googleBtn').classList.remove('active');
+        $('autoBtn').classList.remove('active');
+        $('autoBtn').classList.add('active');
+        showToast('翻译源: 自动模式');
+    }
+    
+    // ============ 语音功能 ============
+    function initSpeech() {
+        var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            document.getElementById('micBtn').style.display = 'none';
+            $('micBtn').style.display = 'none';
             return;
         }
         
         recognition = new SpeechRecognition();
         recognition.continuous = false;
         recognition.interimResults = false;
-        recognition.lang = getSpeechLang(srcLang.value);
+        recognition.lang = 'lo-LA';
         
-        recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            inputText.value = transcript;
+        recognition.onresult = function(event) {
+            var transcript = event.results[0][0].transcript;
+            $('inputText').value = transcript;
             updateCharCount();
-            performTranslation();
+            doTranslate();
             stopRecording();
         };
         
-        recognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
+        recognition.onerror = function(event) {
             stopRecording();
             if (event.error === 'no-speech') {
-                showToast('没有检测到语音，请再说一次');
+                showToast('没有检测到语音');
             } else if (event.error === 'not-allowed') {
                 showToast('请允许麦克风权限');
             }
         };
         
-        recognition.onend = () => {
-            stopRecording();
-        };
+        recognition.onend = stopRecording;
     }
     
     function startRecording() {
-        if (!recognition) {
-            initSpeechRecognition();
-        }
+        if (!recognition) initSpeech();
         if (recognition) {
-            recognition.lang = getSpeechLang(srcLang.value);
+            recognition.lang = getSpeechLang($('srcLang').value);
             recognition.start();
             isRecording = true;
-            document.getElementById('micBtn').classList.add('recording');
+            $('micBtn').classList.add('recording');
             showToast('正在聆听...');
         }
     }
     
     function stopRecording() {
-        if (recognition) {
-            recognition.stop();
-        }
+        if (recognition) recognition.stop();
         isRecording = false;
-        document.getElementById('micBtn').classList.remove('recording');
+        $('micBtn').classList.remove('recording');
     }
     
-    document.getElementById('micBtn').addEventListener('click', () => {
-        if (isRecording) {
-            stopRecording();
-        } else {
-            startRecording();
-        }
-    });
-    
-    srcLang.addEventListener('change', () => {
-        if (recognition) {
-            recognition.lang = getSpeechLang(srcLang.value);
-        }
-    });
-    
-    // =====================================================
-    // 语音朗读
-    // =====================================================
     function speakText(text, lang) {
         if (!('speechSynthesis' in window)) {
             showToast('浏览器不支持朗读');
             return;
         }
         window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
+        var u = new SpeechSynthesisUtterance(text);
         u.lang = getSpeechLang(lang);
         u.rate = 0.9;
         window.speechSynthesis.speak(u);
         showToast('正在朗读...');
     }
     
-    document.getElementById('speakInputBtn').addEventListener('click', () => {
-        const text = document.getElementById('inputText').value.trim();
-        if (text) {
-            speakText(text, srcLang.value);
-        } else {
-            showToast('请先输入文字');
-        }
-    });
+    // ============ 初始化 ============
+    function init() {
+        // DOM 元素
+        srcLangEl = $('srcLang');
+        tgtLangEl = $('tgtLang');
+        inputTextEl = $('inputText');
+        resultTextEl = $('resultText');
+        translateBtnEl = $('translateBtn');
+        
+        // 模式切换
+        $('offlineModeBtn').onclick = function() { setTranslationMode('offline'); };
+        $('onlineModeBtn').onclick = function() { setTranslationMode('online'); };
+        $('bingBtn').onclick = function() { setTranslatorSource('bing'); };
+        $('googleBtn').onclick = function() { setTranslatorSource('google'); };
+        $('autoBtn').onclick = function() { setTranslatorSource('auto'); };
+        
+        // 语言交换
+        $('swapBtn').onclick = function() {
+            var tmp = srcLangEl.value;
+            srcLangEl.value = tgtLangEl.value;
+            tgtLangEl.value = tmp;
+            showToast('已交换语言');
+        };
+        
+        // 输入事件
+        inputTextEl.addEventListener('input', updateCharCount);
+        
+        // 翻译按钮
+        translateBtnEl.onclick = doTranslate;
+        
+        // 清空按钮
+        $('clearBtn').onclick = function() {
+            inputTextEl.value = '';
+            updateCharCount();
+            resultTextEl.textContent = '翻译结果将显示在这里';
+        };
+        
+        // 复制按钮
+        $('copyBtn').onclick = function() {
+            var text = resultTextEl.textContent;
+            if (text && text !== '翻译结果将显示在这里') {
+                navigator.clipboard.writeText(text).then(function() {
+                    showToast('已复制到剪贴板');
+                }).catch(function() {
+                    showToast('复制失败');
+                });
+            }
+        };
+        
+        // 朗读按钮
+        $('readBtn').onclick = function() {
+            var text = resultTextEl.textContent;
+            if (text && text !== '翻译结果将显示在这里') {
+                speakText(text, tgtLangEl.value);
+            }
+        };
+        
+        // 语音输入按钮
+        $('micBtn').onclick = function() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        };
+        
+        // 朗读输入
+        $('speakInputBtn').onclick = function() {
+            var text = inputTextEl.value.trim();
+            if (text) {
+                speakText(text, srcLangEl.value);
+            }
+        };
+        
+        // 语言变化时更新语音识别语言
+        srcLangEl.addEventListener('change', function() {
+            if (recognition) {
+                recognition.lang = getSpeechLang(srcLangEl.value);
+            }
+        });
+        
+        console.log('老挝语翻译器已初始化');
+    }
     
-    document.getElementById('readBtn').addEventListener('click', () => {
-        const text = document.getElementById('resultText').textContent;
-        if (text && text !== '翻译结果将显示在这里' && !text.startsWith('翻译')) {
-            speakText(text, tgtLang.value);
-        } else {
-            showToast('没有可朗读的内容');
-        }
-    });
-    
-    // =====================================================
-    // 清空 & 复制
-    // =====================================================
-    document.getElementById('clearBtn').addEventListener('click', () => {
-        document.getElementById('inputText').value = '';
-        updateCharCount();
-        document.getElementById('inputText').focus();
-        showToast('已清空');
-    });
-    
-    document.getElementById('copyBtn').addEventListener('click', () => {
-        const text = document.getElementById('resultText').textContent;
-        if (text && text !== '翻译结果将显示在这里') {
-            navigator.clipboard.writeText(text).then(() => {
-                showToast('已复制到剪贴板');
-            }).catch(() => {
-                showToast('复制失败');
-            });
-        } else {
-            showToast('没有可复制的内容');
-        }
-    });
-    
-    // =====================================================
-    // 初始化
-    // =====================================================
-    initSpeechRecognition();
-    showToast('老挝语翻译器已就绪！🎉  可切换在线/离线模式');
+    // DOM 加载完成后初始化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
     </script>
 </body>
 </html>
