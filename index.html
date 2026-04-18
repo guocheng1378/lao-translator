@@ -739,6 +739,15 @@ async function performTranslationAsync() {
 }
 
 // =====================================================
+// =====================================================
+// 全局 DOM 元素引用（提前声明避免作用域问题）
+// =====================================================
+const srcLang = document.getElementById('srcLang');
+const tgtLang = document.getElementById('tgtLang');
+const inputText = document.getElementById('inputText');
+const resultText = document.getElementById('resultText');
+const translateBtn = document.getElementById('translateBtn');
+
 
 // =====================================================
     // 内置老挝语↔中文词典数据库
@@ -1296,13 +1305,7 @@ async function performTranslationAsync() {
     }
     
     // =====================================================
-    // 事件处理
     // =====================================================
-    const srcLang = document.getElementById('srcLang');
-    const tgtLang = document.getElementById('tgtLang');
-    const inputText = document.getElementById('inputText');
-    const resultText = document.getElementById('resultText');
-    const translateBtn = document.getElementById('translateBtn');
     
     // 语言交换
     document.getElementById('swapBtn').addEventListener('click', () => {
