@@ -695,6 +695,15 @@ async function autoTranslate(text, fromLang, toLang) {
 /**
  * 翻译函数，支持在线和离线模式
  */
+// =====================================================
+// 全局 DOM 元素引用（必须在函数定义之前声明）
+// =====================================================
+const srcLang = document.getElementById('srcLang');
+const tgtLang = document.getElementById('tgtLang');
+const inputText = document.getElementById('inputText');
+const resultText = document.getElementById('resultText');
+const translateBtn = document.getElementById('translateBtn');
+
 async function performTranslationAsync() {
     const text = inputText.value.trim();
     if (!text) {
@@ -738,12 +747,6 @@ async function performTranslationAsync() {
     }
 }
 
-// =====================================================
-// =====================================================
-// 全局 DOM 元素引用（提前声明避免作用域问题）
-// =====================================================
-const srcLang = document.getElementById('srcLang');
-const tgtLang = document.getElementById('tgtLang');
 const inputText = document.getElementById('inputText');
 const resultText = document.getElementById('resultText');
 const translateBtn = document.getElementById('translateBtn');
