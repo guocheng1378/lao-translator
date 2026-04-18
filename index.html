@@ -136,6 +136,7 @@
         .action-btn.mic { background: #e3f2fd; color: #2196f3; }
         .action-btn.mic:hover { background: #bbdefb; }
         .action-btn.mic.recording { background: #ffcdd2; color: #f44336; animation: pulse 1s infinite; }
+        .action-btn.mic.disabled { background: #f5f5f5; color: #ccc; cursor: not-allowed; }
         @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
         .action-btn.clear { background: #fce4ec; color: #e91e63; }
         .action-btn.clear:hover { background: #f8bbd9; }
@@ -182,6 +183,7 @@
         .result-btn:hover { background: #f5f5f5; }
         .result-btn.copy { color: #1890ff; }
         .result-btn.speak { color: #1aad19; }
+        .result-btn.speak.speaking { background: #c8e6c9; color: #148f14; }
         .toast {
             position: fixed;
             top: 20px;
@@ -265,6 +267,28 @@
             border-color: #1890ff;
             color: #1890ff;
         }
+        .speech-warning {
+            background: #fff7e6;
+            border: 1px solid #ffd591;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 15px;
+            font-size: 0.8em;
+            color: #d46b08;
+            display: none;
+        }
+        .speech-warning.show { display: block; }
+        .speech-warning strong { color: #d48806; }
+        .network-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .network-status.online { background: #52c41a; }
+        .network-status.offline { background: #ff4d4f; }
     </style>
 </head>
 <body>
@@ -286,6 +310,11 @@
         </header>
         
         <div class="translator-card">
+            <div class="speech-warning" id="speechWarning">
+                <strong>⚠️ 语音功能提示：</strong>
+                <span id="speechWarningText"></span>
+            </div>
+            
             <div class="dict-info" id="dictInfo">
                 <strong>💡 提示：</strong>本版本使用内置老挝语↔中文词典，支持常用词汇、短语和句型翻译。可直接使用语音输入！
             </div>
@@ -338,6 +367,13 @@
     var translatorSource = 'auto';
     var isRecording = false;
     var recognition = null;
+    var isSpeaking = false;
+    
+    // 语音功能支持状态
+    var speechSupport = {
+        recognition: false,
+        synthesis: false
+    };
     
     // ============ 内置词典 ============
     var DICTIONARY = {
@@ -400,7 +436,7 @@
         var t = $('toast');
         t.textContent = msg;
         t.classList.add('show');
-        setTimeout(function() { t.classList.remove('show'); }, 2000);
+        setTimeout(function() { t.classList.remove('show'); }, 2500);
     }
     
     function updateCharCount() {
@@ -409,6 +445,140 @@
     
     function getSpeechLang(lang) {
         return lang === 'lo' ? 'lo-LA' : 'zh-CN';
+    }
+    
+    // ============ 浏览器和语音功能检测 ============
+    function detectBrowser() {
+        var ua = navigator.userAgent || '';
+        var browser = 'unknown';
+        
+        if (ua.indexOf('UCBrowser') > -1 || ua.indexOf('UCWEB') > -1) {
+            browser = 'uc';
+        } else if (ua.indexOf('MicroMessenger') > -1) {
+            browser = 'weixin';
+        } else if (ua.indexOf('QQBrowser') > -1) {
+            browser = 'qq';
+        } else if (ua.indexOf('Firefox') > -1) {
+            browser = 'firefox';
+        } else if (ua.indexOf('Chrome') > -1) {
+            browser = 'chrome';
+        } else if (ua.indexOf('Safari') > -1 && ua.indexOf('Chrome') === -1) {
+            browser = 'safari';
+        } else if (ua.indexOf('iPhone') > -1 || ua.indexOf('iPad') > -1) {
+            browser = 'ios';
+        } else if (ua.indexOf('Android') > -1) {
+            browser = 'android';
+        }
+        
+        return browser;
+    }
+    
+    function checkSpeechRecognitionSupport() {
+        var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            return false;
+        }
+        
+        // 尝试实例化检测
+        try {
+            var testRec = new SpeechRecognition();
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+    
+    function checkSpeechSynthesisSupport() {
+        if (!('speechSynthesis' in window)) {
+            return false;
+        }
+        
+        // 尝试获取语音列表
+        try {
+            // 部分浏览器支持 speechSynthesis 但没有语音
+            var voices = speechSynthesis.getVoices();
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+    
+    function initSpeechSupport() {
+        var browser = detectBrowser();
+        
+        // 检测语音识别
+        speechSupport.recognition = checkSpeechRecognitionSupport();
+        
+        // 检测语音合成
+        speechSupport.synthesis = checkSpeechSynthesisSupport();
+        
+        // 针对UC浏览器特殊处理
+        if (browser === 'uc') {
+            // UC浏览器通常不支持语音识别
+            speechSupport.recognition = false;
+            // UC浏览器的语音合成支持有限
+            if (speechSupport.synthesis) {
+                var voices = speechSynthesis.getVoices();
+                if (!voices || voices.length === 0) {
+                    speechSupport.synthesis = false;
+                }
+            }
+        }
+        
+        // 更新UI
+        updateSpeechUI();
+    }
+    
+    function updateSpeechUI() {
+        var warningEl = $('speechWarning');
+        var warningTextEl = $('speechWarningText');
+        var micBtn = $('micBtn');
+        var speakInputBtn = $('speakInputBtn');
+        var readBtn = $('readBtn');
+        
+        var messages = [];
+        var browser = detectBrowser();
+        var isOffline = !navigator.onLine;
+        
+        // 网络状态提示
+        if (isOffline) {
+            messages.push('<span class="network-status offline"></span>当前离线');
+        } else {
+            messages.push('<span class="network-status online"></span>网络正常');
+        }
+        
+        // 语音识别提示
+        if (!speechSupport.recognition) {
+            micBtn.classList.add('disabled');
+            micBtn.title = '当前浏览器不支持语音输入，请使用系统键盘的语音输入功能';
+            
+            if (browser === 'uc') {
+                messages.push('UC浏览器不支持语音识别，请使用手机系统键盘的🎤按钮进行语音输入');
+            } else if (browser === 'weixin') {
+                messages.push('微信内置浏览器可能不支持语音识别，请使用系统键盘');
+            } else {
+                messages.push('当前浏览器不支持语音识别，请使用手机键盘的🎤按钮');
+            }
+        }
+        
+        // 语音合成提示
+        if (!speechSupport.synthesis) {
+            speakInputBtn.classList.add('disabled');
+            speakInputBtn.title = '当前浏览器不支持语音朗读';
+            readBtn.classList.add('disabled');
+            readBtn.title = '当前浏览器不支持语音朗读';
+            
+            if (browser === 'uc') {
+                messages.push('UC浏览器语音合成支持有限，如需朗读请复制文字后使用系统朗读功能');
+            } else {
+                messages.push('当前浏览器不支持语音朗读功能');
+            }
+        }
+        
+        if (messages.length > 0) {
+            warningTextEl.innerHTML = messages.join(' · ');
+            warningEl.classList.add('show');
+        }
     }
     
     // ============ 翻译函数 ============
@@ -548,63 +718,162 @@
     function initSpeech() {
         var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            $('micBtn').style.display = 'none';
             return;
         }
         
-        recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'lo-LA';
-        
-        recognition.onresult = function(event) {
-            var transcript = event.results[0][0].transcript;
-            $('inputText').value = transcript;
-            updateCharCount();
-            doTranslate();
-            stopRecording();
-        };
-        
-        recognition.onerror = function(event) {
-            stopRecording();
-            if (event.error === 'no-speech') {
-                showToast('没有检测到语音');
-            } else if (event.error === 'not-allowed') {
-                showToast('请允许麦克风权限');
-            }
-        };
-        
-        recognition.onend = stopRecording;
+        try {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'lo-LA';
+            
+            recognition.onresult = function(event) {
+                var transcript = event.results[0][0].transcript;
+                $('inputText').value = transcript;
+                updateCharCount();
+                doTranslate();
+                stopRecording();
+            };
+            
+            recognition.onerror = function(event) {
+                stopRecording();
+                switch(event.error) {
+                    case 'no-speech':
+                        showToast('没有检测到语音，请重试');
+                        break;
+                    case 'not-allowed':
+                        showToast('请允许麦克风权限');
+                        break;
+                    case 'network':
+                        showToast('网络错误，请检查网络连接后重试');
+                        break;
+                    case 'aborted':
+                        // 用户主动停止，不提示
+                        break;
+                    default:
+                        showToast('语音识别出错，请使用键盘输入');
+                }
+            };
+            
+            recognition.onend = stopRecording;
+            
+            speechSupport.recognition = true;
+        } catch(e) {
+            speechSupport.recognition = false;
+        }
     }
     
     function startRecording() {
-        if (!recognition) initSpeech();
+        // 检查支持状态
+        if (!speechSupport.recognition) {
+            var browser = detectBrowser();
+            if (browser === 'uc') {
+                showToast('UC浏览器不支持语音识别，请使用系统键盘🎤');
+            } else {
+                showToast('当前浏览器不支持语音识别');
+            }
+            return;
+        }
+        
+        // 检查网络状态
+        if (!navigator.onLine) {
+            showToast('语音识别需要网络连接，请检查网络');
+            return;
+        }
+        
+        if (!recognition) {
+            initSpeech();
+        }
+        
         if (recognition) {
-            recognition.lang = getSpeechLang($('srcLang').value);
-            recognition.start();
-            isRecording = true;
-            $('micBtn').classList.add('recording');
-            showToast('正在聆听...');
+            try {
+                recognition.lang = getSpeechLang($('srcLang').value);
+                recognition.start();
+                isRecording = true;
+                $('micBtn').classList.add('recording');
+                showToast('正在聆听... 点击麦克风可停止');
+            } catch(e) {
+                showToast('启动语音识别失败');
+                isRecording = false;
+            }
         }
     }
     
     function stopRecording() {
-        if (recognition) recognition.stop();
+        if (recognition && isRecording) {
+            try {
+                recognition.stop();
+            } catch(e) {
+                // 忽略停止错误
+            }
+        }
         isRecording = false;
         $('micBtn').classList.remove('recording');
     }
     
+    // 语音合成 Polyfill 和改进
     function speakText(text, lang) {
-        if (!('speechSynthesis' in window)) {
-            showToast('浏览器不支持朗读');
+        // 检查支持状态
+        if (!speechSupport.synthesis) {
+            showToast('当前浏览器不支持语音朗读功能');
             return;
         }
-        window.speechSynthesis.cancel();
-        var u = new SpeechSynthesisUtterance(text);
-        u.lang = getSpeechLang(lang);
-        u.rate = 0.9;
-        window.speechSynthesis.speak(u);
-        showToast('正在朗读...');
+        
+        // 停止之前的朗读
+        if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+            isSpeaking = false;
+            $('readBtn').classList.remove('speaking');
+            return;
+        }
+        
+        try {
+            window.speechSynthesis.cancel();
+            
+            var u = new SpeechSynthesisUtterance(text);
+            u.lang = getSpeechLang(lang);
+            u.rate = 0.9;
+            u.volume = 1;
+            
+            // 尝试获取可用的语音
+            var voices = window.speechSynthesis.getVoices();
+            var targetLang = lang === 'lo' ? 'lao' : 'zh';
+            
+            // 优先选择匹配的语音
+            for (var i = 0; i < voices.length; i++) {
+                var voice = voices[i];
+                if (voice.lang.indexOf(targetLang) !== -1 || 
+                    voice.lang.indexOf(lang === 'lo' ? 'LO' : 'ZH') !== -1) {
+                    u.voice = voice;
+                    break;
+                }
+            }
+            
+            u.onstart = function() {
+                isSpeaking = true;
+                $('readBtn').classList.add('speaking');
+                showToast('正在朗读...');
+            };
+            
+            u.onend = function() {
+                isSpeaking = false;
+                $('readBtn').classList.remove('speaking');
+            };
+            
+            u.onerror = function(event) {
+                isSpeaking = false;
+                $('readBtn').classList.remove('speaking');
+                if (event.error !== 'canceled') {
+                    showToast('朗读出错，请重试');
+                }
+            };
+            
+            window.speechSynthesis.speak(u);
+        } catch(e) {
+            showToast('朗读功能出错');
+            isSpeaking = false;
+            $('readBtn').classList.remove('speaking');
+        }
     }
     
     // ============ 初始化 ============
@@ -615,6 +884,26 @@
         inputTextEl = $('inputText');
         resultTextEl = $('resultText');
         translateBtnEl = $('translateBtn');
+        
+        // 初始化语音支持检测
+        initSpeechSupport();
+        
+        // 初始化语音识别
+        initSpeech();
+        
+        // 语音合成可能需要异步加载 voices
+        if (window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = function() {
+                speechSupport.synthesis = checkSpeechSynthesisSupport();
+                updateSpeechUI();
+            };
+            
+            // 尝试获取语音
+            setTimeout(function() {
+                speechSupport.synthesis = checkSpeechSynthesisSupport();
+                updateSpeechUI();
+            }, 1000);
+        }
         
         // 模式切换
         $('offlineModeBtn').onclick = function() { setTranslationMode('offline'); };
@@ -668,6 +957,7 @@
         $('micBtn').onclick = function() {
             if (isRecording) {
                 stopRecording();
+                showToast('已停止录音');
             } else {
                 startRecording();
             }
@@ -675,6 +965,10 @@
         
         // 朗读输入
         $('speakInputBtn').onclick = function() {
+            if (!speechSupport.synthesis) {
+                showToast('当前浏览器不支持语音朗读');
+                return;
+            }
             var text = inputTextEl.value.trim();
             if (text) {
                 speakText(text, srcLangEl.value);
@@ -686,6 +980,17 @@
             if (recognition) {
                 recognition.lang = getSpeechLang(srcLangEl.value);
             }
+        });
+        
+        // 监听网络状态变化
+        window.addEventListener('online', function() {
+            updateSpeechUI();
+            showToast('网络已连接');
+        });
+        
+        window.addEventListener('offline', function() {
+            updateSpeechUI();
+            showToast('网络已断开，语音功能不可用');
         });
         
         console.log('老挝语翻译器已初始化');
