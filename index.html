@@ -1117,7 +1117,22 @@ async function loadLocalModel() {
     try {
         // 关键：从CDN加载transformers.js（不拦截任何fetch）
         // 使用国内可访问的CDN
-        const { pipeline, Fileset, env } = await import('./transformers.min.mjs');
+        // 使用 script 标签加载 UMD 模块
+await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = './transformers.min.js';
+    script.onload = () => {
+        // UMD 模块会挂载到全局变量
+        resolve();
+    };
+    script.onerror = reject;
+    document.head.appendChild(script);
+});
+
+// 从全局变量获取导出
+const { pipeline, Fileset, env } = window;
+
+console.log('Transformers.js loaded:', typeof pipeline, typeof Fileset, typeof env);
 
         // 配置：允许本地模型
         env.allowLocalModels = true;
